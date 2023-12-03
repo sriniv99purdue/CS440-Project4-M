@@ -4,137 +4,88 @@
 ##  
 ##  Important: fill you name and PUID
 ##  
-##  Name:
-##  PUID:
+##  Name: Haris Hasan
+##  PUID: 0032930768
 #############################################
 
-from pyspark import SparkConf,SparkContext
+# to run: 
+# chmod +x auto_script.sh
+# export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-19.jdk/Contents/Home
+# ./auto_script.sh 
+
+from pyspark import SparkConf, SparkContext
 from pyspark.streaming import StreamingContext
-from pyspark.sql import Row,SQLContext
-from pyspark.sql.functions import explode
-from pyspark.sql.functions import col
 import sys
 import heapq
-
-def aggregate_global_topk(new_values, global_topk):
-
-    #HINT: $new_values format is [integer1, integer2 .....]
-    #       return values format should also be a integer list
-    ########### TODO Start #####################################
-
-
-    # Add your implementation here
-
-
-    ########### TODO End #####################################
-    return global_topk
-
-
-def get_sql_context_instance(spark_context):
-    if ('sqlContextSingletonInstance' not in globals()):
-        globals()['sqlContextSingletonInstance'] = SQLContext(spark_context)
-    return globals()['sqlContextSingletonInstance']
-
-def process_global(time, rdd):
-    try:
-        # Get spark sql singleton context from the current context
-        sql_context = get_sql_context_instance(rdd.context)
-        # convert the RDD to Row RDD
-        row_rdd = rdd.map(lambda w: Row(global_topk=w[1]))
-        python_list = []
-
-        # HINT: row_rdd now only have one row, format is as following
-        #
-        # ------- global_topk--------
-        # - [7868, 9478, ...., 8898]-
-        # ---------------------------
-        #
-        # Sort the integers if necessary, and extract top 10 integers
-        # to variable $python_list
-
-
-        ########### TODO Start #####################################
-        
-
-
-
-        # Add your implementation here
-
-
-
-        ########### TODO End ######################################
-        
-        fd = open("./result/task2.txt", "a")
-        fd.write(' '.join( str(ele) for ele in python_list ))
-        fd.write('\n')
-        fd.close()
-    except:
-        e1 = sys.exc_info()[0]
-        e2 = sys.exc_info()[1]
-        print("Error: %s %s" % (e1, e2))
 
 def process_window(time, rdd):
     try:
         print("----------- %s -----------" % str(time))
         
-        python_list = []
+        #extract the top 10 integers from the RDD for Task 1
+        top10_current_interval = rdd.takeOrdered(10, key=lambda x: -x)
 
-        # HINT: rdd have many rows, each row only contains one integer
-        #   Sort these integers and extract the largest 10 integers to
-        #   variable $python_list
-        ########### TODO Start #####################################
-        
-
-
-
-
-        # Add your implementation here
-
-
-
-        #python_list = YOUR_IMPLEMENTATION
-
-        ########### TODO End ######################################
-        fd = open("./result/task1.txt", "a")
-        fd.write(' '.join( str(ele) for ele in python_list ))
-        fd.write('\n')
-        fd.close()
+        #write the results for Task 1 to the file
+        with open("./result/task1.txt", "a") as fd:
+            fd.write(' '.join(str(num) for num in top10_current_interval) + '\n')
     except:
         e1 = sys.exc_info()[0]
         e2 = sys.exc_info()[1]
         print("Error: %s %s" % (e1, e2))
 
-# create spark configuration
+def update_global_topk(new_values, global_topk):
+    if global_topk is None:
+        global_topk = []
+    for value in new_values:
+        heapq.heappush(global_topk, value)
+        if len(global_topk) > 10:
+            heapq.heappop(global_topk)
+    return global_topk
+
+def process_global(time, rdd):
+    try:
+        #get the global top 10 integers
+        global_top10 = rdd.collect()
+        if global_top10:
+            global_top10 = heapq.nlargest(10, global_top10[0])
+
+            #write the results for Task 2 to the file
+            with open("./result/task2.txt", "a") as fd:
+                fd.write(' '.join(str(num) for num in global_top10) + '\n')
+    except:
+        e1 = sys.exc_info()[0]
+        e2 = sys.exc_info()[1]
+        print("Error: %s %s" % (e1, e2))
+
+# Create Spark configuration
 conf = SparkConf()
 conf.setAppName("StreamApp")
 
-# create spark context with the above configuration
+# Create Spark context with the above configuration
 sc = SparkContext(conf=conf)
 sc.setLogLevel("ERROR")
 
-# create the Streaming Context from the above spark context with interval size 3 seconds
+# Create the Streaming Context from the above spark context with interval size 3 seconds
 ssc = StreamingContext(sc, 3)
 
-# setting a checkpoint to allow RDD recovery
+# Setting a checkpoint to allow RDD recovery
 ssc.checkpoint("checkpoint_topk")
 
-# read data from port 9009
-dataStream = ssc.socketTextStream("localhost",9009)
+# Read data from port 9009
+dataStream = ssc.socketTextStream("localhost", 9009)
 
-# parse input from string to integer
+# Parse input from string to integer
 dataStream = dataStream.map(lambda x: int(x))
 
-# do processing for each RDD generated in each interval
+# Process each RDD for Task 1
 dataStream.foreachRDD(process_window)
 
-tags = dataStream.map(lambda x: (1, x))
+# Update and process global state for Task 2
+global_topk = dataStream.map(lambda x: (1, x)).updateStateByKey(update_global_topk)
+global_topk.foreachRDD(process_global)
 
-tags_totals = tags.updateStateByKey(aggregate_global_topk)
-
-# do processing for global topk
-tags_totals.foreachRDD(process_global)
-
-# start the streaming computation
+# Start the streaming computation
 ssc.start()
-# wait for the streaming to finish
+
+# Wait for the streaming to finish
 ssc.awaitTermination()
